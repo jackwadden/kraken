@@ -1,6 +1,10 @@
 CXX = g++
-CXXFLAGS = -Wall -fopenmp -O3
+CXXFLAGS = -Wall -O3
 PROGS = db_sort set_lcas classify make_seqid_to_taxid_map db_shrink
+
+#CUDA
+NVCC = nvcc
+CUDAFLAGS = -arch=sm_35 -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -lcuda -lcudart
 
 .PHONY: all install clean
 
@@ -18,7 +22,8 @@ db_sort: krakendb.o quickfile.o
 
 set_lcas: krakendb.o quickfile.o krakenutil.o seqreader.o
 
-classify: krakendb.o quickfile.o krakenutil.o seqreader.o
+classify: krakendb.o quickfile.o krakenutil.o seqreader.o classify_gpu.o
+	$(NVCC) -O3 $(CUDAFLAGS) classify.cpp -o $@ $^
 
 make_seqid_to_taxid_map: quickfile.o
 
@@ -33,3 +38,6 @@ seqreader.o: seqreader.cpp seqreader.hpp quickfile.hpp
 
 quickfile.o: quickfile.cpp quickfile.hpp
 	$(CXX) $(CXXFLAGS) -c quickfile.cpp
+
+classify_gpu.o: classify_gpu.cu
+	$(NVCC) -c -arch=sm_35 classify_gpu.cu
