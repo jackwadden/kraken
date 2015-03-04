@@ -32,7 +32,7 @@ const size_t DEF_WORK_UNIT_SIZE = 500000;
 /*
  * CUDA CLASSIFY FUNCTION
  */
-extern void kernel_wrapper(int *a, int *b, int length);
+extern int kernel_wrapper(int *, int *, int);
 
 using namespace std;
 using namespace kraken;
@@ -193,8 +193,8 @@ void process_file(char *filename) {
             /*
              * CUDA CALL
              */
-            int length = 256;
-            int byteSize = length * sizeof(int);
+            int length = 32;
+            size_t byteSize = length * sizeof(int);
             int *a = (int*)malloc(byteSize);
             int *b = (int*)malloc(byteSize);
             for (size_t i = 0; i < length; i++){
@@ -202,7 +202,8 @@ void process_file(char *filename) {
                 b[i] = 2;
             }
             kernel_wrapper( a, b, length);
-            printf("should be 3 = %d\n", a[0]);
+            free(a);
+            free(b);
             //
 
             for (size_t j = 0; j < work_unit.size(); j++)

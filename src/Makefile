@@ -4,7 +4,7 @@ PROGS = db_sort set_lcas classify make_seqid_to_taxid_map db_shrink
 
 #CUDA
 NVCC = nvcc
-CUDAFLAGS = -arch=sm_35 -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -lcuda -lcudart
+CUDAFLAGS = -arch=sm_35 -g -G -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -lcuda -lcudart
 
 .PHONY: all install clean
 
@@ -40,4 +40,4 @@ quickfile.o: quickfile.cpp quickfile.hpp
 	$(CXX) $(CXXFLAGS) -c quickfile.cpp
 
 classify_gpu.o: classify_gpu.cu
-	$(NVCC) -c -arch=sm_35 classify_gpu.cu
+	$(NVCC) -c -g -G -arch=sm_35 classify_gpu.cu

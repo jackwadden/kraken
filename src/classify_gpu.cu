@@ -1,10 +1,21 @@
+#include "stdio.h"
+
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+    if (code != cudaSuccess) 
+        {
+            fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+            if (abort) exit(code);
+        }
+}
+
 __global__ void vector_add(int *a, int *b, int length)
 {
-    int tx = threadIdx.x;
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if(tx < length) {
-        a[tx] = a[tx] + b[tx];
-    }
+    if(id < length)
+        a[id] = a[id] + b[id];
 }
 
 void kernel_wrapper(int *a, int *b, int length)
@@ -12,6 +23,7 @@ void kernel_wrapper(int *a, int *b, int length)
 
     int *a_d;
     int *b_d;
+
     int blockSize = 32;
     int numBlocks = (int)(length / blockSize);
 
@@ -22,19 +34,21 @@ void kernel_wrapper(int *a, int *b, int length)
     dim3 threads( blockSize, 1 );
     dim3 blocks( numBlocks, 1 );
 
-    int byteLength = length * sizeof(int);
+    size_t byteLength = length * sizeof(int);
 
-    cudaMalloc( (void **)&a_d, byteLength );
-    cudaMalloc( (void **)&b_d, byteLength );
+    gpuErrchk(cudaMalloc( (void **)&a_d, byteLength ));
+    gpuErrchk(cudaMalloc( (void **)&b_d, byteLength ));
 
-    cudaMemcpy( a_d, a, byteLength, cudaMemcpyHostToDevice );
-    cudaMemcpy( b_d, b, byteLength, cudaMemcpyHostToDevice );
+    gpuErrchk( cudaMemcpy( a_d, a, byteLength, cudaMemcpyHostToDevice ));
+    gpuErrchk( cudaMemcpy( b_d, b, byteLength, cudaMemcpyHostToDevice ));
 
-    vector_add<<< blocks, threads >>>( a, b , length);
+    vector_add<<< blocks, threads >>>( a_d, b_d , length);
+    gpuErrchk( cudaPeekAtLastError() );
 
-    cudaMemcpy( a, a_d, byteLength, cudaMemcpyDeviceToHost );
-    cudaMemcpy( b, b_d, byteLength, cudaMemcpyDeviceToHost );
+    gpuErrchk( cudaMemcpy( a, a_d, byteLength, cudaMemcpyDeviceToHost ));
+    gpuErrchk( cudaMemcpy( b, b_d, byteLength, cudaMemcpyDeviceToHost ));
 
-    cudaFree(a_d);
-    cudaFree(b_d);
+    gpuErrchk( cudaFree(a_d) );
+    gpuErrchk( cudaFree(b_d) );
+
 }
