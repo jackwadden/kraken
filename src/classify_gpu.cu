@@ -13,7 +13,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 __global__ void vector_add(int *a, int *b, int length)
 {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
-
+    //test comment -Dor
     if(id < length)
         a[id] = a[id] + b[id] + jack;
 }
