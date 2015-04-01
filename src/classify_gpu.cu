@@ -21,6 +21,8 @@ __global__ void vector_add(int *a, int *b, int length)
 void kernel_wrapper(int *a, int *b, int length)
 {
 
+    // new comment
+
     int *a_d;
     int *b_d;
 
