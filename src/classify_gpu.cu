@@ -15,7 +15,7 @@ __global__ void vector_add(int *a, int *b, int length)
     int id = blockIdx.x * blockDim.x + threadIdx.x;
 
     if(id < length)
-        a[id] = a[id] + b[id] + 7 + 33;
+        a[id] = a[id] + b[id] + 5;
 }
 
 void kernel_wrapper(int *a, int *b, int length)
