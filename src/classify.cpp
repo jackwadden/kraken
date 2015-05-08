@@ -29,13 +29,15 @@
 
 const size_t DEF_WORK_UNIT_SIZE = 500000;
 
+using namespace std;
+using namespace kraken;
+
 /*
  * CUDA CLASSIFY FUNCTION
  */
-extern int kernel_wrapper(int *, int *, int);
+extern int kernel_wrapper(int width, vector<DNASequence> reads);
+//
 
-using namespace std;
-using namespace kraken;
 
 void parse_command_line(int argc, char **argv);
 void usage(int exit_code=EX_USAGE);
@@ -86,6 +88,11 @@ int main(int argc, char **argv) {
         db_file.load_file();
     Database = KrakenDB(db_file.ptr());
     KmerScanner::set_k(Database.get_k());
+
+    //WADDEN TODO
+    // Convert DB to GPU readable format
+
+    //
 
     QuickFile idx_file;
     idx_file.open_file(Index_filename);
@@ -193,6 +200,7 @@ void process_file(char *filename) {
             /*
              * CUDA CALL
              */
+            /*
             int length = 32;
             size_t byteSize = length * sizeof(int);
             int *a = (int*)malloc(byteSize);
@@ -201,11 +209,14 @@ void process_file(char *filename) {
                 a[i] = 1;
                 b[i] = 2;
             }
-            kernel_wrapper( a, b, length);
+            */
+            kernel_wrapper( 251, work_unit);
+            /*
             free(a);
             free(b);
+            */
             //
-
+            /*
             for (size_t j = 0; j < work_unit.size(); j++)
                 classify_sequence( work_unit[j], kraken_output_ss,
                                    classified_output_ss, unclassified_output_ss );
@@ -222,6 +233,7 @@ void process_file(char *filename) {
                 total_bases += total_nt;
                 cerr << "\rProcessed " << total_sequences << " sequences (" << total_bases << " bp) ...";
             }
+            */
         }
     }  // end parallel section
 

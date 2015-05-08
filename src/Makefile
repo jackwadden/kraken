@@ -39,5 +39,5 @@ seqreader.o: seqreader.cpp seqreader.hpp quickfile.hpp
 quickfile.o: quickfile.cpp quickfile.hpp
 	$(CXX) $(CXXFLAGS) -c quickfile.cpp
 
-classify_gpu.o: classify_gpu.cu
+classify_gpu.o: classify_gpu.cu seqreader.hpp
 	$(NVCC) -c -g -G -arch=sm_35 classify_gpu.cu
