@@ -9,11 +9,12 @@
 
 // kraken
 #include "seqreader.hpp"
+#include "krakendb.hpp"
 
 using namespace std;
 using namespace kraken;
 
-DNASequence global;
+__constant__ uint64_t INDEX2_XOR_MASK = 0xe37e28c4271b5a2dULL;
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -26,18 +27,8 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 }
 
 
-__global__ void vector_add(int *a, int *b, int length)
-{
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    //test comment -Dor
-    if(id < length)
-        a[id] = a[id] + b[id] + 7;
-}
-__constant__ uint64_t INDEX2_XOR_MASK = 0xe37e28c4271b5a2dULL;
-
-
-// Code mostly from Jellyfish 1.6 source                                                                                             
-__device__ uint64_t reverse_complement(uint64_t kmer, uint8_t n) {
+// Code mostly from Jellyfish 1.6 source                                      
+__device__ uint64_t reverse_complement_gpu(uint64_t kmer, uint8_t n, uint64_t key_bits_d) {
   kmer = ((kmer >> 2)  & 0x3333333333333333UL) | ((kmer & 0x3333333333333333UL) << 2);
   kmer = ((kmer >> 4)  & 0x0F0F0F0F0F0F0F0FUL) | ((kmer & 0x0F0F0F0F0F0F0F0FUL) << 4);
   kmer = ((kmer >> 8)  & 0x00FF00FF00FF00FFUL) | ((kmer & 0x00FF00FF00FF00FFUL) << 8);
@@ -46,30 +37,35 @@ __device__ uint64_t reverse_complement(uint64_t kmer, uint8_t n) {
   return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - (n << 1));
 }
 
-// Code mostly from Jellyfish 1.6 source                                                                                             
-__device__ uint64_t reverse_complement(uint64_t kmer) {
+
+
+// Code mostly from Jellyfish 1.6 source
+inline __device__ uint64_t reverse_complement_gpu(uint64_t kmer, uint64_t key_bits_d) {
   kmer = ((kmer >> 2)  & 0x3333333333333333UL) | ((kmer & 0x3333333333333333UL) << 2);
   kmer = ((kmer >> 4)  & 0x0F0F0F0F0F0F0F0FUL) | ((kmer & 0x0F0F0F0F0F0F0F0FUL) << 4);
   kmer = ((kmer >> 8)  & 0x00FF00FF00FF00FFUL) | ((kmer & 0x00FF00FF00FF00FFUL) << 8);
   kmer = ((kmer >> 16) & 0x0000FFFF0000FFFFUL) | ((kmer & 0x0000FFFF0000FFFFUL) << 16);
   kmer = ( kmer >> 32                        ) | ( kmer                         << 32);
-  return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - ((key_bits/2) << 1));
+  return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - ((key_bits_d/2) << 1));
 }
 
 
-// Lexicographically smallest of k-mer and reverse comp. of k-mer                                                                    
-__device__ uint64_t canonical_representation(uint64_t kmer, uint8_t n) {
-  uint64_t revcom = reverse_complement(kmer, n);
+
+// Lexicographically smallest of k-mer and reverse comp. of k-mer
+inline __device__ uint64_t canonical_representation_gpu(uint64_t kmer, uint8_t n, uint64_t key_bits_d) {
+    uint64_t revcom = reverse_complement_gpu(kmer, n, key_bits_d);
+    return kmer < revcom ? kmer : revcom;
+}
+
+
+
+inline __device__ uint64_t canonical_representation_gpu(uint64_t kmer, uint64_t key_bits_d) {
+    uint64_t revcom = reverse_complement_gpu(kmer, key_bits_d/2, key_bits_d);
   return kmer < revcom ? kmer : revcom;
 }
 
-__device__ uint64_t canonical_representation(uint64_t kmer) {
-  uint64_t revcom = reverse_complement(kmer, key_bits/2);
-  return kmer < revcom ? kmer : revcom;
-}
 
-
-//__device__ int get_kmer(int kmer_start, int *read)
+/*
 __device__ uint64_t bin_key(uint64_t kmer, uint64_t idx_nt) {
   uint8_t nt = idx_nt;
   uint64_t xor_mask = INDEX2_XOR_MASK;
@@ -85,61 +81,31 @@ __device__ uint64_t bin_key(uint64_t kmer, uint64_t idx_nt) {
   }
   return min_bin_key;
 }
+*/
 
-// Separate functions to avoid a conditional in the function                                                                         
-// This probably isn't necessary...                                                                                                   
-__device__ uint64_t bin_key(uint64_t kmer) {
-  uint8_t nt = index_ptr->indexed_nt();
-  uint8_t idx_type = index_ptr->index_type();
-  uint64_t xor_mask = idx_type == 1 ? 0 : INDEX2_XOR_MASK;
-  uint64_t mask = 1 << (nt * 2);
-  mask--;
-  xor_mask &= mask;
-  uint64_t min_bin_key = ~0;
-  for (uint64_t i = 0; i < key_bits / 2 - nt + 1; i++) {
-    uint64_t temp_bin_key = xor_mask ^ canonical_representation(kmer & mask, nt);
-    if (temp_bin_key < min_bin_key)
-      min_bin_key = temp_bin_key;
-    kmer >>= 2;
-  }
-  return min_bin_key;
-}
+// Separate functions to avoid a conditional in the function
+// This probably isn't necessary...
+__device__ uint64_t bin_key_gpu(uint64_t kmer, uint64_t key_bits_d, uint64_t nt) {
+    /*
+      uint8_t nt = index_ptr->indexed_nt();
+      uint8_t idx_type = index_ptr->index_type();
+      uint64_t xor_mask = idx_type == 1 ? 0 : INDEX2_XOR_MASK;
+    */
+    //ONLY SUPPORTS PREMADE DB WITH V2 IDX FOR NOW
 
+    uint64_t xor_mask = INDEX2_XOR_MASK;
+    uint64_t mask = 1 << ((uint8_t)nt * 2);
+    mask--;
+    xor_mask &= mask;
+    uint64_t min_bin_key = ~0;
+    for (uint64_t i = 0; i < key_bits_d / 2 - nt + 1; i++) {
+        uint64_t temp_bin_key = xor_mask ^ canonical_representation_gpu(kmer & mask, nt, key_bits_d);
+        if (temp_bin_key < min_bin_key)
+            min_bin_key = temp_bin_key;
+        kmer >>= 2;
+    }
 
-
-
-
-__global__ void kernel(int *reads, int num_of_reads)
-{
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    int read_length = 0;
-    int length_bits = 10;
-    int ints_per_read = 16;
-    int kmer_length = 31;
-
-    if(blockIdx.x =< num_of_reads){
-      if(threadIdx.x == 1){
-	read_length = ( reads[blockIdx.x*int_per_read] >> sizeof(read[0])*8-length_bits) 
-      }
-          
-      __syncthreads();
-    
-      __shared__ unsigned int kmers [read_length-kmer_length+1];
-      
-      if (threadIdx.x =< (read_length - kmer_length)){
-	
-	kmers[threadIdx.x] = get_kmer(threadIdx.x, reads)
-	
-	
-	
-	
-      }
-      
-      
-      
-
-      
-    }        
+    return min_bin_key;
 }
 
 
@@ -162,24 +128,95 @@ __host__ void addRead(char * h_reads,
             // if there is a bp left, add it
             if((i*4 + j) < readLen) {
                 switch(read[i*4 + j]) {
-                case 0 : // A
+                case 'A' : // A
                     tmp = tmp | 0;
                     break;
-                case 1 : // T
+                case 'C' : // T
                     tmp = tmp | 1;
                     break;
-                case 2 : // G
+                case 'G' : // G
                     tmp = tmp | 2;
                     break;
-                case 3 : // C
+                case 'T' : // C
                     tmp = tmp | 3;
                     break;
                 }
+                //cout << hex << read[i*4 + j] << endl;
             }
         }
         // store every 4 bp into a single char array after length
+        //cout << hex << (int)tmp << endl;
         h_reads[(bytesPerRead * readNum) + 1 + i] = tmp;
     }
+    //cout << endl;
+}
+
+
+__global__ void kernel(char *reads, 
+                       int num_reads, 
+                       int read_bytes,
+                       int kmer_len,
+                       uint64_t * output,
+                       uint64_t key_bits_gpu,
+                       uint64_t nt)
+{
+    //SETUP
+    extern __shared__ char rd[];
+
+    int block_id = blockIdx.x + blockIdx.y * gridDim.x
+        + gridDim.x * gridDim.y * blockIdx.z;
+    int thread_id = block_id * blockDim.x + threadIdx.x;
+    int work_size = 1;
+    
+    // FOR EVERY READ
+    for(int read_num = work_size * block_id;
+        read_num < (work_size * (block_id + 1)); 
+        read_num++) {
+        
+        //ACTIVATE THREADS
+        int read_len;
+        read_len = reads[read_num * read_bytes];
+        if(threadIdx.x < read_len - kmer_len) {
+            
+            // GROUP STORES READ IN SHARED MEM
+            if(threadIdx.x == 0){
+                for(int i = 0; i < read_bytes; i++)
+                    rd[i] = reads[read_num * read_bytes + 1 + i]; 
+            }
+            __syncthreads();
+            //EACH THREAD GETS A KMER FROM THE READ
+            uint64_t kmer = 0;
+            int cur_bp = 0;
+            int limit_bp = threadIdx.x + kmer_len;
+            for(int i = 0; i < read_bytes - 1; i++) {
+                char window = rd[i];
+                for(int j = 6; j >= 0; j-=2) {
+                    if(cur_bp < limit_bp) {
+                        // if there is a bp left, add it
+                        if(cur_bp < read_len) {
+                            // shift in 00
+                            kmer <<= 2;
+                            // grab two bits of window
+                            kmer |= ((window >> j) & 3);
+                        }
+                    }
+                    cur_bp++;
+                }
+            }
+
+            //EACH THREAD CALCULATES A MINIMIZER FROM THE KMER
+            uint64_t minimizer = bin_key_gpu(canonical_representation_gpu(kmer, key_bits_gpu), key_bits_gpu, nt);
+            //output[thread_id] = kmer;
+            
+            //EACH THREAD GETS A HIGH AND LOW SEARCH SPACE
+            
+            
+            //EACH THREAD LOOKS FOR ITS TAXON
+            
+            //EACH THREAD UPDATES THE TAXON HISTOGRAM
+        }
+    }
+
 }
 
 
@@ -189,7 +226,7 @@ __host__ void addRead(char * h_reads,
  *  |read len (8)| read (512) |
  *
  */
-void kernel_wrapper(int maxReadLen, vector<DNASequence> reads)
+void kernel_wrapper(int maxReadLen, vector<DNASequence> reads, uint64_t key_bits_gpu, uint64_t nt)
 {
 
     // Convert vector of strings to GPU appropriate data structure
@@ -210,41 +247,60 @@ void kernel_wrapper(int maxReadLen, vector<DNASequence> reads)
                 reads[i].seq.length(), 
                 reads[i].seq.c_str(), 
                 i);
-        printf("length: %c\n", h_reads[i*bytesPerRead]);        
+        /*
+        for(int j = 0; j < 63; j++)
+            cout << j << ": " << dec <<  h_reads[i*bytesPerRead + j] << endl;        
+        */
     }
+    
+    printf("num reads: %d\n", numReads);
 
-
-
-    /*
-    int *a_d;
-    int *b_d;
-
-    int blockSize = 32;
-    int numBlocks = (int)(length / blockSize);
-
-    if(length % blockSize) {
+    // CUDA SETUP
+    int blockSize = 256;
+    int numBlocks = (int)(numReads);
+    if(numReads % blockSize) {
         numBlocks++;
     }
+    dim3 threads( blockSize, 1, 1 );
+    dim3 blocks( numBlocks, 1, 1 );
 
-    dim3 threads( blockSize, 1 );
-    dim3 blocks( numBlocks, 1 );
+    // HOST ALLOCATE
+    size_t byteLength = sizeof(uint64_t) * 2000000;
+    uint64_t * h_output;
+    gpuErrchk(cudaMallocHost( (void **)&h_output, byteLength ));
 
-    size_t byteLength = length * sizeof(int);
+    // DEVICE ALLOCATE
+    char * d_reads;
+    uint64_t * d_output;
+    gpuErrchk(cudaMalloc( (void **)&d_reads, numReads * bytesPerRead) );
+    gpuErrchk(cudaMalloc( (void **)&d_output, byteLength) );
 
-    gpuErrchk(cudaMalloc( (void **)&a_d, byteLength ));
-    gpuErrchk(cudaMalloc( (void **)&b_d, byteLength ));
-
-    gpuErrchk( cudaMemcpy( a_d, a, byteLength, cudaMemcpyHostToDevice ));
-    gpuErrchk( cudaMemcpy( b_d, b, byteLength, cudaMemcpyHostToDevice ));
-
-    vector_add<<< blocks, threads >>>( a_d, b_d , length);
+    // MEM COPY TO
+    gpuErrchk(cudaMemcpy(d_reads, h_reads, numReads * bytesPerRead, cudaMemcpyHostToDevice));
+    
+    // KERNEL LAUNCH
+    kernel<<< blocks, threads, bytesPerRead >>>( d_reads,
+                                                 numReads,
+                                                 bytesPerRead,
+                                                 31,
+                                                 d_output,
+                                                 key_bits_gpu,
+                                                 nt);
+    
+    
     gpuErrchk( cudaPeekAtLastError() );
 
-    gpuErrchk( cudaMemcpy( a, a_d, byteLength, cudaMemcpyDeviceToHost ));
-    gpuErrchk( cudaMemcpy( b, b_d, byteLength, cudaMemcpyDeviceToHost ));
+    // MEM COPY FROM
+    gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
 
-    gpuErrchk( cudaFree(a_d) );
-    gpuErrchk( cudaFree(b_d) );
-    */
+    // PRINT OUTPUT    
+    for(int i = 0; i < 70; i++)
+        cout << hex << h_output[i] << endl;
+    
+    // CLEANUP
+    gpuErrchk( cudaFree(d_reads) );
+    gpuErrchk( cudaFree(d_output) );    
+
     gpuErrchk( cudaFreeHost(h_reads) );
+    gpuErrchk( cudaFreeHost(h_output) );
 }

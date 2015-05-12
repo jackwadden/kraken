@@ -35,7 +35,7 @@ using namespace kraken;
 /*
  * CUDA CLASSIFY FUNCTION
  */
-extern int kernel_wrapper(int width, vector<DNASequence> reads);
+extern int kernel_wrapper(int width, vector<DNASequence> reads, uint64_t key_bits_gpu, uint64_t nt);
 //
 
 
@@ -100,6 +100,8 @@ int main(int argc, char **argv) {
         idx_file.load_file();
     KrakenDBIndex db_index(idx_file.ptr());
     Database.set_index(&db_index);
+
+    //
 
     if (Populate_memory)
         cerr << "complete." << endl;
@@ -200,23 +202,15 @@ void process_file(char *filename) {
             /*
              * CUDA CALL
              */
-            /*
-            int length = 32;
-            size_t byteSize = length * sizeof(int);
-            int *a = (int*)malloc(byteSize);
-            int *b = (int*)malloc(byteSize);
-            for (size_t i = 0; i < length; i++){
-                a[i] = 1;
-                b[i] = 2;
-            }
-            */
-            kernel_wrapper( 251, work_unit);
-            /*
-            free(a);
-            free(b);
-            */
-            //
-            /*
+            
+            cout << "work unit size: " << work_unit.size() << endl;
+
+            kernel_wrapper( 251, 
+                            work_unit, 
+                            Database.get_key_bits(),
+                            Database.get_index()->indexed_nt());
+
+            
             for (size_t j = 0; j < work_unit.size(); j++)
                 classify_sequence( work_unit[j], kraken_output_ss,
                                    classified_output_ss, unclassified_output_ss );
@@ -233,7 +227,7 @@ void process_file(char *filename) {
                 total_bases += total_nt;
                 cerr << "\rProcessed " << total_sequences << " sequences (" << total_bases << " bp) ...";
             }
-            */
+            
         }
     }  // end parallel section
 
@@ -262,6 +256,7 @@ void classify_sequence(DNASequence &dna, ostringstream &koss,
             }
             else {
                 ambig_list.push_back(0);
+                
                 uint32_t *val_ptr = Database.kmer_query(
                                                         Database.canonical_representation(*kmer_ptr),
                                                         &current_bin_key,

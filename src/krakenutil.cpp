@@ -169,7 +169,9 @@ namespace kraken {
           ambig |= 1;
           break;
       }
+
       kmer &= kmer_mask;
+
       ambig &= mini_kmer_mask;
     }
     return &kmer;
