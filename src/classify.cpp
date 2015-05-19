@@ -35,7 +35,11 @@ using namespace kraken;
 /*
  * CUDA CLASSIFY FUNCTION
  */
-extern int kernel_wrapper(int width, vector<DNASequence> reads, uint64_t key_bits_gpu, uint64_t nt);
+extern int kernel_wrapper(KrakenDB *db,
+                          int width, 
+                          vector<DNASequence> reads, 
+                          uint64_t key_bits_gpu, 
+                          uint64_t nt);
 //
 
 
@@ -89,11 +93,6 @@ int main(int argc, char **argv) {
     Database = KrakenDB(db_file.ptr());
     KmerScanner::set_k(Database.get_k());
 
-    //WADDEN TODO
-    // Convert DB to GPU readable format
-
-    //
-
     QuickFile idx_file;
     idx_file.open_file(Index_filename);
     if (Populate_memory)
@@ -101,7 +100,6 @@ int main(int argc, char **argv) {
     KrakenDBIndex db_index(idx_file.ptr());
     Database.set_index(&db_index);
 
-    //
 
     if (Populate_memory)
         cerr << "complete." << endl;
@@ -202,19 +200,19 @@ void process_file(char *filename) {
             /*
              * CUDA CALL
              */
-            
-            cout << "work unit size: " << work_unit.size() << endl;
 
-            kernel_wrapper( 251, 
-                            work_unit, 
-                            Database.get_key_bits(),
-                            Database.get_index()->indexed_nt());
+            // KERNEL
+            kernel_wrapper(&Database, 
+                           251, 
+                           work_unit, 
+                           Database.get_key_bits(),
+                           Database.get_index()->indexed_nt());
 
-            
+            /*
             for (size_t j = 0; j < work_unit.size(); j++)
                 classify_sequence( work_unit[j], kraken_output_ss,
                                    classified_output_ss, unclassified_output_ss );
-
+            
 #pragma omp critical(write_output)
             {
                 if (Print_kraken)
@@ -226,7 +224,10 @@ void process_file(char *filename) {
                 total_sequences += work_unit.size();
                 total_bases += total_nt;
                 cerr << "\rProcessed " << total_sequences << " sequences (" << total_bases << " bp) ...";
+            
             }
+            */
+            
             
         }
     }  // end parallel section
@@ -251,6 +252,7 @@ void classify_sequence(DNASequence &dna, ostringstream &koss,
         KmerScanner scanner(dna.seq);
         while ((kmer_ptr = scanner.next_kmer()) != NULL) {
             taxon = 0;
+            
             if (scanner.ambig_kmer()) {
                 ambig_list.push_back(1);
             }
@@ -263,6 +265,7 @@ void classify_sequence(DNASequence &dna, ostringstream &koss,
                                                         &current_min_pos, &current_max_pos
                                                         );
                 taxon = val_ptr ? *val_ptr : 0;
+                
                 if (taxon) {
                     hit_counts[taxon]++;
                     if (Quick_mode && ++hits >= Minimum_hit_count)

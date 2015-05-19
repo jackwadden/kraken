@@ -228,7 +228,12 @@ namespace kraken {
             }
         }
 
+        //WADDEN
+        //std::cout << "min: " << min << " max: " << max << std::endl;
+        //
+
         // Binary search with large window
+       
         while (min + 15 <= max) {
             mid = min + (max - min) / 2;
             comp_kmer = 0;
@@ -241,11 +246,15 @@ namespace kraken {
             else
                 return (uint32_t *) (ptr + pair_sz * mid + key_len);
         }
+        
         // Linear search once window shrinks
         for (mid = min; mid <= max; mid++) {
             comp_kmer = 0;
             memcpy(&comp_kmer, ptr + pair_sz * mid, key_len);
             comp_kmer &= (1ull << key_bits) - 1;  // trim any excess
+            if(kmer == 0x1496b46d4517658e) {
+                std::cout << "THIS: " << comp_kmer << std::endl;
+            }
             if (kmer == comp_kmer)
                 return (uint32_t *) (ptr + pair_sz * mid + key_len);
         }
@@ -262,6 +271,10 @@ namespace kraken {
             max = index_ptr->at(b_key + 1) - 1;
             // Recursive call w/ adjusted search params and w/o retry
             answer = kmer_query(kmer, &b_key, &min, &max, false);
+            if(kmer == 0x1496b46d4517658e) {
+                std::cout << "THIS2: " << comp_kmer << std::endl;
+            }
+
             // Update caller's search params due to bin key change
             if (last_bin_key != NULL) {
                 *last_bin_key = b_key;

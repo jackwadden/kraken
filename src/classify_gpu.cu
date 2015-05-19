@@ -6,6 +6,7 @@
 #include "stdio.h"
 #include <stdlib.h>
 #include <stdint.h>
+#include <iomanip>
 
 // kraken
 #include "seqreader.hpp"
@@ -152,7 +153,12 @@ __host__ void addRead(char * h_reads,
 }
 
 
-__global__ void kernel(char *reads, 
+__global__ void kernel(uint64_t * idx,
+                       char * kdb,
+                       uint32_t pair_sz,
+                       uint32_t key_bits,
+                       uint64_t key_len,
+                       char *reads, 
                        int num_reads, 
                        int read_bytes,
                        int kmer_len,
@@ -160,8 +166,6 @@ __global__ void kernel(char *reads,
                        uint64_t key_bits_gpu,
                        uint64_t nt)
 {
-    //SETUP
-    extern __shared__ char rd[];
 
     int block_id = blockIdx.x + blockIdx.y * gridDim.x
         + gridDim.x * gridDim.y * blockIdx.z;
@@ -169,55 +173,95 @@ __global__ void kernel(char *reads,
     int work_size = 1;
     
     // FOR EVERY READ
-    for(int read_num = work_size * block_id;
-        read_num < (work_size * (block_id + 1)); 
-        read_num++) {
+    //for(int read_num = work_size * block_id;
+    int read_num = work_size * block_id;
+
+    //ACTIVATE THREADS
+    int read_len;
+    read_len = reads[read_num * read_bytes];
+    if(threadIdx.x < read_len - kmer_len) {
         
-        //ACTIVATE THREADS
-        int read_len;
-        read_len = reads[read_num * read_bytes];
-        if(threadIdx.x < read_len - kmer_len) {
-            
-            // GROUP STORES READ IN SHARED MEM
-            if(threadIdx.x == 0){
-                for(int i = 0; i < read_bytes; i++)
-                    rd[i] = reads[read_num * read_bytes + 1 + i]; 
-            }
-            __syncthreads();
-            //EACH THREAD GETS A KMER FROM THE READ
-            uint64_t kmer = 0;
-            int cur_bp = 0;
-            int limit_bp = threadIdx.x + kmer_len;
-            for(int i = 0; i < read_bytes - 1; i++) {
-                char window = rd[i];
-                for(int j = 6; j >= 0; j-=2) {
-                    if(cur_bp < limit_bp) {
-                        // if there is a bp left, add it
-                        if(cur_bp < read_len) {
-                            // shift in 00
-                            kmer <<= 2;
-                            // grab two bits of window
-                            kmer |= ((window >> j) & 3);
-                        }
+        //EACH THREAD GETS A KMER FROM THE READ
+        uint64_t kmer = 0;
+        int cur_bp = 0;
+        int limit_bp = threadIdx.x + kmer_len;
+        for(int i = 0; i < read_bytes - 1; i++) {
+            //char window = rd[i];
+            char window = reads[read_num * read_bytes + 1 + i] ;
+            for(int j = 6; j >= 0; j-=2) {
+                if(cur_bp < limit_bp) {
+                    // if there is a bp left, add it
+                    if(cur_bp < read_len) {
+                        // shift in 00
+                        kmer <<= 2;
+                        // grab two bits of window
+                        kmer |= ((window >> j) & 3);
                     }
-                    cur_bp++;
+                }
+                cur_bp++;
+            }
+        }
+        uint64_t kmer_mask = ~0;
+        kmer_mask >>= 2;
+        kmer &= kmer_mask;
+        
+        //EACH THREAD CALCULATES A MINIMIZER FROM THE KMER
+        uint64_t canon_kmer = canonical_representation_gpu(kmer, key_bits_gpu);
+        uint64_t minimizer = bin_key_gpu(canon_kmer, key_bits_gpu, nt);
+        //output[thread_id] = kmer;      
+        //EACH THREAD GETS A HIGH AND LOW SEARCH SPACE
+        int min = idx[minimizer];
+        int max = idx[minimizer + 1] - 1;
+        
+        //EACH THREAD LOOKS FOR ITS TAXON VIA BINARY SEARCH
+        // Binary search with large window
+        uint64_t comp_kmer;
+        int mid;
+        uint32_t * taxon_ptr = 0;
+        
+        int found = 0;
+        while (min + 15 <= max) {
+            mid = min + (max - min) / 2;
+            comp_kmer = 0x0000000000000000ULL;
+            memcpy(&comp_kmer, kdb + pair_sz * mid, key_len);
+            comp_kmer &= (1ull << key_bits) - 1;  // trim any excess
+            if (canon_kmer > comp_kmer)
+                min = mid + 1;
+            else if (canon_kmer < comp_kmer)
+                max = mid - 1;
+            else{
+                taxon_ptr = (uint32_t *) (kdb + pair_sz * mid + key_len);
+                found = 1;
+                break;
+            }        
+        }
+        
+        // Linear search once window shrinks
+        if(!found) {
+            for (mid = min; mid <= max; mid++) {
+                comp_kmer = 0x0000000000000000ULL;
+                memcpy(&comp_kmer, kdb + pair_sz * mid, key_len);
+                comp_kmer &= (1ull << key_bits) - 1;  // trim any excess
+                if (canon_kmer == comp_kmer) {
+                    taxon_ptr = (uint32_t *) (kdb + pair_sz * mid + key_len);
                 }
             }
-
-            //EACH THREAD CALCULATES A MINIMIZER FROM THE KMER
-            uint64_t minimizer = bin_key_gpu(canonical_representation_gpu(kmer, key_bits_gpu), key_bits_gpu, nt);
-            //output[thread_id] = kmer;
-            
-            //EACH THREAD GETS A HIGH AND LOW SEARCH SPACE
-            
-            
-            //EACH THREAD LOOKS FOR ITS TAXON
-            
-            //EACH THREAD UPDATES THE TAXON HISTOGRAM
         }
+               
+        //output[thread_id * 2] = kmer;
+        //output[thread_id * 2 + 1] = taxon_ptr ? *taxon_ptr : 0;
+       
+        //EACH THREAD UPDATES THE TAXON HISTOGRAM
+        /*
+          if(thread_id == 0) {
+          for(int i = 0; i < 1000; i++) {
+          output = kdb + pair_sz * i + key_len;
+          }
+          }
+        */
     }
-
 }
+
 
 
 /*
@@ -226,7 +270,11 @@ __global__ void kernel(char *reads,
  *  |read len (8)| read (512) |
  *
  */
-void kernel_wrapper(int maxReadLen, vector<DNASequence> reads, uint64_t key_bits_gpu, uint64_t nt)
+void kernel_wrapper(KrakenDB * database,
+                    int maxReadLen, 
+                    vector<DNASequence> reads, 
+                    uint64_t key_bits_gpu, 
+                    uint64_t nt)
 {
 
     // Convert vector of strings to GPU appropriate data structure
@@ -252,54 +300,144 @@ void kernel_wrapper(int maxReadLen, vector<DNASequence> reads, uint64_t key_bits
             cout << j << ": " << dec <<  h_reads[i*bytesPerRead + j] << endl;        
         */
     }
+    cout << hex << endl;
     
     printf("num reads: %d\n", numReads);
 
     // CUDA SETUP
     int blockSize = 256;
     int numBlocks = (int)(numReads);
+    /*
     if(numReads % blockSize) {
         numBlocks++;
     }
+    */
+
     dim3 threads( blockSize, 1, 1 );
     dim3 blocks( numBlocks, 1, 1 );
 
     // HOST ALLOCATE
-    size_t byteLength = sizeof(uint64_t) * 2000000;
+    size_t byteLength = sizeof(char) * 2000000;
     uint64_t * h_output;
     gpuErrchk(cudaMallocHost( (void **)&h_output, byteLength ));
 
     // DEVICE ALLOCATE
+    cudaEvent_t alloc_start, alloc_stop;
+    cudaEventCreate(&alloc_start);
+    cudaEventCreate(&alloc_stop);
+
     char * d_reads;
     uint64_t * d_output;
+    uint64_t * d_idx;
+    char * d_kdb;
+
+    cudaEventRecord(alloc_start);
     gpuErrchk(cudaMalloc( (void **)&d_reads, numReads * bytesPerRead) );
     gpuErrchk(cudaMalloc( (void **)&d_output, byteLength) );
+    // allocate for index array
+    size_t idx_size = 536870928; //unclear how to get this number from the object yet
+    gpuErrchk(cudaMalloc( (void **)&d_idx, idx_size) );
+    // allocate for db
+    size_t kdb_size = database->pair_size() * database->get_key_ct();
+    gpuErrchk(cudaMalloc( (void **)&d_kdb, kdb_size) );
+
+    cudaEventRecord(alloc_stop);
+    cudaEventSynchronize(alloc_stop);
+    float alloc_ms = 0;
+    cudaEventElapsedTime(&alloc_ms, alloc_start, alloc_stop);
+    cout<< "ALLOCATION TIME: " << alloc_ms << " ms" << endl;
 
     // MEM COPY TO
+    cudaEvent_t copyto_start, copyto_stop;
+    cudaEventCreate(&copyto_start);
+    cudaEventCreate(&copyto_stop);
+
+    cudaEventRecord(copyto_start);
+    
+    //
     gpuErrchk(cudaMemcpy(d_reads, h_reads, numReads * bytesPerRead, cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_idx, database->get_index()->get_array(), idx_size, cudaMemcpyHostToDevice));
+    gpuErrchk(cudaMemcpy(d_kdb, database->get_pair_ptr(), kdb_size, cudaMemcpyHostToDevice));
+
     
+    cudaEventRecord(copyto_stop);
+    cudaEventSynchronize(copyto_stop);
+    float copyto_ms = 0;
+    cudaEventElapsedTime(&copyto_ms, copyto_start, copyto_stop);
+    cout<< "COPY TO TIME: " << copyto_ms << " ms" << endl;
+
     // KERNEL LAUNCH
-    kernel<<< blocks, threads, bytesPerRead >>>( d_reads,
-                                                 numReads,
-                                                 bytesPerRead,
-                                                 31,
-                                                 d_output,
-                                                 key_bits_gpu,
-                                                 nt);
-    
-    
+    cudaEvent_t kernel_start, kernel_stop;
+    cudaEventCreate(&kernel_start);
+    cudaEventCreate(&kernel_stop);
+
+    cout << "LAUNCHING KERNEL :: blocks(" 
+         << dec 
+         << blocks.x << "," 
+         << blocks.y << "," 
+         << blocks.z << ")" 
+         << " threads("        
+         << threads.x << "," 
+         << threads.y << "," 
+         << threads.z << ")" 
+         << endl;
+
+    cudaEventRecord(kernel_start);
+    //
+    kernel<<< blocks, threads>>>(d_idx,
+                                                d_kdb,
+                                                database->pair_size(),
+                                                database->get_key_bits(),
+                                                database->get_key_len(),
+                                                d_reads,
+                                                numReads,
+                                                bytesPerRead,
+                                                31,
+                                                d_output,
+                                                key_bits_gpu,
+                                                nt);
     gpuErrchk( cudaPeekAtLastError() );
 
-    // MEM COPY FROM
-    gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
+    cudaEventRecord(kernel_stop);
+    cudaEventSynchronize(kernel_stop);
+    float kernel_ms = 0;
+    cudaEventElapsedTime(&kernel_ms, kernel_start, kernel_stop);
+    cout<< "KERNEL TIME: " << kernel_ms << " ms" << endl;
 
-    // PRINT OUTPUT    
-    for(int i = 0; i < 70; i++)
-        cout << hex << h_output[i] << endl;
-    
+
+    // MEM COPY FROM
+    cudaEvent_t copyfrom_start, copyfrom_stop;
+    cudaEventCreate(&copyfrom_start);
+    cudaEventCreate(&copyfrom_stop);
+
+    cudaEventRecord(copyfrom_start);
+
+    //
+    //gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
+
+    cudaEventRecord(copyfrom_stop);
+    cudaEventSynchronize(copyfrom_stop);
+    float copyfrom_ms = 0;
+    cudaEventElapsedTime(&copyfrom_ms, copyfrom_start, copyfrom_stop);
+    cout<< "COPY FROM TIME: " << copyfrom_ms << " ms" << endl;
+
+    // PRINT OUTPUT
+    for(int i = 0; i < 1024; i+=2) {
+        //cout << "#" << dec << i/2 << ":gpu::kmer: " << hex << h_output[i] << " taxon: " << h_output[i+1] << endl;
+    }
+    /*
+      bytes
+    for(int i = 0; i < 500; i++) {
+        printf("i:%d %02X\n",i, (int)h_output[i]);
+        //cout << "i:" << i << setw(2) << setfill('0') << hex << (int) h_output[i] << endl ;
+
+    }
+    */
     // CLEANUP
     gpuErrchk( cudaFree(d_reads) );
     gpuErrchk( cudaFree(d_output) );    
+    gpuErrchk( cudaFree(d_idx) );    
+    gpuErrchk( cudaFree(d_kdb) );    
 
     gpuErrchk( cudaFreeHost(h_reads) );
     gpuErrchk( cudaFreeHost(h_output) );
