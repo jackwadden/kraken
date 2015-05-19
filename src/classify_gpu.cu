@@ -167,6 +167,15 @@ __global__ void kernel(uint64_t * idx,
                        uint64_t nt)
 {
 
+    //SHARED DECLS
+    __shared__ uint32_t taxons[256];
+    __shared__ uint32_t hist[512];
+    __shared__ uint32_t hit_counter;
+    hit_counter = 0;
+    int found = 0;
+    uint32_t * taxon_ptr = 0;    
+
+    // ID INITS
     int block_id = blockIdx.x + blockIdx.y * gridDim.x
         + gridDim.x * gridDim.y * blockIdx.z;
     int thread_id = block_id * blockDim.x + threadIdx.x;
@@ -217,9 +226,7 @@ __global__ void kernel(uint64_t * idx,
         // Binary search with large window
         uint64_t comp_kmer;
         int mid;
-        uint32_t * taxon_ptr = 0;
         
-        int found = 0;
         while (min + 15 <= max) {
             mid = min + (max - min) / 2;
             comp_kmer = 0x0000000000000000ULL;
@@ -231,6 +238,8 @@ __global__ void kernel(uint64_t * idx,
                 max = mid - 1;
             else{
                 taxon_ptr = (uint32_t *) (kdb + pair_sz * mid + key_len);
+                taxons[threadIdx.x] = *taxon_ptr;
+                atomicAdd(&hit_counter, 1);
                 found = 1;
                 break;
             }        
@@ -244,22 +253,66 @@ __global__ void kernel(uint64_t * idx,
                 comp_kmer &= (1ull << key_bits) - 1;  // trim any excess
                 if (canon_kmer == comp_kmer) {
                     taxon_ptr = (uint32_t *) (kdb + pair_sz * mid + key_len);
+                    taxons[threadIdx.x] = *taxon_ptr;
+                    atomicAdd(&hit_counter, 1);
                 }
             }
         }
-               
-        //output[thread_id * 2] = kmer;
-        //output[thread_id * 2 + 1] = taxon_ptr ? *taxon_ptr : 0;
-       
-        //EACH THREAD UPDATES THE TAXON HISTOGRAM
-        /*
-          if(thread_id == 0) {
-          for(int i = 0; i < 1000; i++) {
-          output = kdb + pair_sz * i + key_len;
-          }
-          }
-        */
     }
+    
+    __syncthreads();
+
+    /*
+    if(threadIdx.x == 0){
+        output[block_id * 2] = kmer;
+        output[block_id * 2 + 1] = hit_count;
+    }
+    */
+
+    //LEAD THREAD POPULATES HISTOGRAM (NOTE: NAIVE O(N^2) IMPL.)
+    uint32_t uniq_counter = 0;
+    uint32_t total_counter = 0;
+    int hit = 0;
+    if(threadIdx.x == 0) {
+        // for all threads
+        int thread_index = 0;
+        while(total_counter < hit_counter && thread_index < blockDim.x) {
+            //if the thread found a taxon
+            uint32_t taxon = taxons[thread_index];
+            if(taxon != 0) {
+                total_counter++;
+                //search in stack for taxon
+                hit = 0;
+                for(int j = 0; j < uniq_counter; j++){
+                    if(hist[j*2] == taxon){
+                        hist[j*2+1]++;
+                        hit = 1;
+                    }
+                }
+                if(!hit) {
+                    hist[uniq_counter*2] = taxon;
+                    hist[uniq_counter*2+1] = 1;
+                    //inc top of stack
+                    uniq_counter++;
+                }
+            }
+            thread_index++;
+        }
+    }
+    
+    if(threadIdx.x == 0){
+        output[block_id * 2] = hist[2];
+        output[block_id * 2 + 1] = hist[3];
+    }
+    /*
+    //EACH THREAD SUMS TAXON'S LTR PATH
+    if(hit_count > 0) {
+        
+    }
+
+    //LEAD THREAD FINDS MAX VIA REDUCTION
+    output[block_id] = 7;
+    */
 }
 
 
@@ -317,7 +370,7 @@ void kernel_wrapper(KrakenDB * database,
     dim3 blocks( numBlocks, 1, 1 );
 
     // HOST ALLOCATE
-    size_t byteLength = sizeof(char) * 2000000;
+    size_t byteLength = sizeof(char) * 4000000;
     uint64_t * h_output;
     gpuErrchk(cudaMallocHost( (void **)&h_output, byteLength ));
 
@@ -413,7 +466,7 @@ void kernel_wrapper(KrakenDB * database,
     cudaEventRecord(copyfrom_start);
 
     //
-    //gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
+    gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
 
     cudaEventRecord(copyfrom_stop);
     cudaEventSynchronize(copyfrom_stop);
@@ -422,8 +475,8 @@ void kernel_wrapper(KrakenDB * database,
     cout<< "COPY FROM TIME: " << copyfrom_ms << " ms" << endl;
 
     // PRINT OUTPUT
-    for(int i = 0; i < 1024; i+=2) {
-        //cout << "#" << dec << i/2 << ":gpu::kmer: " << hex << h_output[i] << " taxon: " << h_output[i+1] << endl;
+    for(int i = 0; i < 256; i+=2) {
+        cout << "#" << dec << i/2 << ":gpu::kmer: " << hex << h_output[i] << " hit_count: " << h_output[i+1] << endl;
     }
     /*
       bytes
