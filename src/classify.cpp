@@ -35,11 +35,7 @@ using namespace kraken;
 /*
  * CUDA CLASSIFY FUNCTION
  */
-extern int kernel_wrapper(KrakenDB *db,
-                          int width, 
-                          vector<DNASequence> reads, 
-                          uint64_t key_bits_gpu, 
-                          uint64_t nt);
+extern int process_file_gpu(char *, KrakenDB * Database, bool, size_t work_unit_size);
 //
 
 
@@ -129,8 +125,10 @@ int main(int argc, char **argv) {
 
     struct timeval tv1, tv2;
     gettimeofday(&tv1, NULL);
-    for (int i = optind; i < argc; i++)
-        process_file(argv[i]);
+    for (int i = optind; i < argc; i++){
+        //process_file(argv[i]);
+        process_file_gpu(argv[i], &Database, Fastq_input, Work_unit_size);
+    }
     gettimeofday(&tv2, NULL);
 
     report_stats(tv1, tv2);
@@ -197,18 +195,6 @@ void process_file(char *filename) {
             classified_output_ss.str("");
             unclassified_output_ss.str("");
       
-            /*
-             * CUDA CALL
-             */
-
-            // KERNEL
-            kernel_wrapper(&Database, 
-                           251, 
-                           work_unit, 
-                           Database.get_key_bits(),
-                           Database.get_index()->indexed_nt());
-
-            /*
             for (size_t j = 0; j < work_unit.size(); j++)
                 classify_sequence( work_unit[j], kraken_output_ss,
                                    classified_output_ss, unclassified_output_ss );
@@ -226,14 +212,13 @@ void process_file(char *filename) {
                 cerr << "\rProcessed " << total_sequences << " sequences (" << total_bases << " bp) ...";
             
             }
-            */
-            
             
         }
     }  // end parallel section
 
     delete reader;
 }
+
 
 void classify_sequence(DNASequence &dna, ostringstream &koss,
                        ostringstream &coss, ostringstream &uoss) {
