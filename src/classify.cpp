@@ -35,7 +35,14 @@ using namespace kraken;
 /*
  * CUDA CLASSIFY FUNCTION
  */
-extern int process_file_gpu(char *, KrakenDB * Database, bool, size_t work_unit_size);
+extern int process_file_gpu(char *, 
+                            KrakenDB * Database, 
+                            map<uint32_t, uint32_t> &parent_map,
+                            bool, 
+                            size_t work_unit_size,
+                            ostream *,
+                            ostream *,
+                            ostream *);
 //
 
 
@@ -54,7 +61,7 @@ bool Quick_mode = false;
 bool Fastq_input = false;
 bool Print_classified = false;
 bool Print_unclassified = false;
-bool Print_kraken = true;
+bool Print_kraken = false;
 bool Populate_memory = false;
 bool Only_classified_kraken_output = false;
 uint32_t Minimum_hit_count = 1;
@@ -126,8 +133,17 @@ int main(int argc, char **argv) {
     struct timeval tv1, tv2;
     gettimeofday(&tv1, NULL);
     for (int i = optind; i < argc; i++){
-        //process_file(argv[i]);
-        process_file_gpu(argv[i], &Database, Fastq_input, Work_unit_size);
+        process_file(argv[i]);
+        /*
+        process_file_gpu(argv[i], 
+                         &Database, 
+                         Parent_map, 
+                         Fastq_input, 
+                         Work_unit_size,
+                         Kraken_output,
+                         Classified_output,
+                         Unclassified_output);
+        */
     }
     gettimeofday(&tv2, NULL);
 

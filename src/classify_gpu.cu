@@ -20,6 +20,9 @@ using namespace kraken;
 
 __constant__ uint64_t INDEX2_XOR_MASK = 0xe37e28c4271b5a2dULL;
 
+extern string hitlist_string(vector<uint32_t> &taxa, vector<uint8_t> &ambig);
+extern bool Print_classified;
+
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
@@ -33,24 +36,24 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 // Code mostly from Jellyfish 1.6 source                                      
 __device__ uint64_t reverse_complement_gpu(uint64_t kmer, uint8_t n, uint64_t key_bits_d) {
-  kmer = ((kmer >> 2)  & 0x3333333333333333UL) | ((kmer & 0x3333333333333333UL) << 2);
-  kmer = ((kmer >> 4)  & 0x0F0F0F0F0F0F0F0FUL) | ((kmer & 0x0F0F0F0F0F0F0F0FUL) << 4);
-  kmer = ((kmer >> 8)  & 0x00FF00FF00FF00FFUL) | ((kmer & 0x00FF00FF00FF00FFUL) << 8);
-  kmer = ((kmer >> 16) & 0x0000FFFF0000FFFFUL) | ((kmer & 0x0000FFFF0000FFFFUL) << 16);
-  kmer = ( kmer >> 32                        ) | ( kmer                         << 32);
-  return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - (n << 1));
+    kmer = ((kmer >> 2)  & 0x3333333333333333UL) | ((kmer & 0x3333333333333333UL) << 2);
+    kmer = ((kmer >> 4)  & 0x0F0F0F0F0F0F0F0FUL) | ((kmer & 0x0F0F0F0F0F0F0F0FUL) << 4);
+    kmer = ((kmer >> 8)  & 0x00FF00FF00FF00FFUL) | ((kmer & 0x00FF00FF00FF00FFUL) << 8);
+    kmer = ((kmer >> 16) & 0x0000FFFF0000FFFFUL) | ((kmer & 0x0000FFFF0000FFFFUL) << 16);
+    kmer = ( kmer >> 32                        ) | ( kmer                         << 32);
+    return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - (n << 1));
 }
 
 
 
 // Code mostly from Jellyfish 1.6 source
 inline __device__ uint64_t reverse_complement_gpu(uint64_t kmer, uint64_t key_bits_d) {
-  kmer = ((kmer >> 2)  & 0x3333333333333333UL) | ((kmer & 0x3333333333333333UL) << 2);
-  kmer = ((kmer >> 4)  & 0x0F0F0F0F0F0F0F0FUL) | ((kmer & 0x0F0F0F0F0F0F0F0FUL) << 4);
-  kmer = ((kmer >> 8)  & 0x00FF00FF00FF00FFUL) | ((kmer & 0x00FF00FF00FF00FFUL) << 8);
-  kmer = ((kmer >> 16) & 0x0000FFFF0000FFFFUL) | ((kmer & 0x0000FFFF0000FFFFUL) << 16);
-  kmer = ( kmer >> 32                        ) | ( kmer                         << 32);
-  return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - ((key_bits_d/2) << 1));
+    kmer = ((kmer >> 2)  & 0x3333333333333333UL) | ((kmer & 0x3333333333333333UL) << 2);
+    kmer = ((kmer >> 4)  & 0x0F0F0F0F0F0F0F0FUL) | ((kmer & 0x0F0F0F0F0F0F0F0FUL) << 4);
+    kmer = ((kmer >> 8)  & 0x00FF00FF00FF00FFUL) | ((kmer & 0x00FF00FF00FF00FFUL) << 8);
+    kmer = ((kmer >> 16) & 0x0000FFFF0000FFFFUL) | ((kmer & 0x0000FFFF0000FFFFUL) << 16);
+    kmer = ( kmer >> 32                        ) | ( kmer                         << 32);
+    return (((uint64_t)-1) - kmer) >> (8 * sizeof(kmer) - ((key_bits_d/2) << 1));
 }
 
 
@@ -65,12 +68,12 @@ inline __device__ uint64_t canonical_representation_gpu(uint64_t kmer, uint8_t n
 
 inline __device__ uint64_t canonical_representation_gpu(uint64_t kmer, uint64_t key_bits_d) {
     uint64_t revcom = reverse_complement_gpu(kmer, key_bits_d/2, key_bits_d);
-  return kmer < revcom ? kmer : revcom;
+    return kmer < revcom ? kmer : revcom;
 }
 
 
 /*
-__device__ uint64_t bin_key(uint64_t kmer, uint64_t idx_nt) {
+  __device__ uint64_t bin_key(uint64_t kmer, uint64_t idx_nt) {
   uint8_t nt = idx_nt;
   uint64_t xor_mask = INDEX2_XOR_MASK;
   uint64_t mask = 1 << (nt * 2);
@@ -78,13 +81,13 @@ __device__ uint64_t bin_key(uint64_t kmer, uint64_t idx_nt) {
   xor_mask &= mask;
   uint64_t min_bin_key = ~0;
   for (uint64_t i = 0; i < key_bits / 2 - nt + 1; i++) {
-    uint64_t temp_bin_key = xor_mask ^ canonical_representation(kmer & mask, nt);
-    if (temp_bin_key < min_bin_key)
-      min_bin_key = temp_bin_key;
-    kmer >>= 2;
+  uint64_t temp_bin_key = xor_mask ^ canonical_representation(kmer & mask, nt);
+  if (temp_bin_key < min_bin_key)
+  min_bin_key = temp_bin_key;
+  kmer >>= 2;
   }
   return min_bin_key;
-}
+  }
 */
 
 // Separate functions to avoid a conditional in the function
@@ -165,7 +168,7 @@ __global__ void kernel(uint64_t * idx,
                        int num_reads, 
                        int read_bytes,
                        int kmer_len,
-                       uint64_t * output,
+                       uint32_t * output,
                        uint64_t nt)
 {
 
@@ -187,10 +190,16 @@ __global__ void kernel(uint64_t * idx,
     //for(int read_num = work_size * block_id;
     int read_num = work_size * block_id;
 
-    //ACTIVATE THREADS
+
     int read_len;
     read_len = reads[read_num * read_bytes];
+    output[threadIdx.x * 2] = 0;
+    output[threadIdx.x * 2 + 1] = 0;
+    taxons[threadIdx.x] = 0;
+
+    //ACTIVATE THREADS
     if(threadIdx.x < read_len - kmer_len) {
+        
         
         //EACH THREAD GETS A KMER FROM THE READ
         uint64_t kmer = 0;
@@ -265,10 +274,10 @@ __global__ void kernel(uint64_t * idx,
     __threadfence();
 
     /*
-    if(threadIdx.x == 0){
-        output[block_id * 2] = kmer;
-        output[block_id * 2 + 1] = hit_count;
-    }
+      if(threadIdx.x == 0){
+      output[block_id * 2] = kmer;
+      output[block_id * 2 + 1] = hit_count;
+      }
     */
 
     //LEAD THREAD POPULATES HISTOGRAM (NOTE: NAIVE O(N^2) IMPL.)
@@ -286,14 +295,14 @@ __global__ void kernel(uint64_t * idx,
                 //search in stack for taxon
                 hit = 0;
                 for(int j = 0; j < uniq_counter; j++){
-                    if(hist[j*2] == taxon){
-                        hist[j*2+1]++;
+                    if(hist[j * 2] == taxon){
+                        hist[j * 2 + 1]++;
                         hit = 1;
                     }
                 }
                 if(!hit) {
-                    hist[uniq_counter*2] = taxon;
-                    hist[uniq_counter*2+1] = 1;
+                    hist[uniq_counter * 2] = taxon;
+                    hist[uniq_counter * 2 + 1] = 1;
                     //inc top of stack
                     uniq_counter++;
                 }
@@ -301,20 +310,16 @@ __global__ void kernel(uint64_t * idx,
             thread_index++;
         }
     }
-    
-    if(threadIdx.x == 0){
-        output[block_id * 2] = hist[2];
-        output[block_id * 2 + 1] = hist[3];
-    }
-    /*
+
+    // THREADS COPY HISTOGRAM TO GLOBAL FOR EXPORT
+    output[block_id * blockDim.x * 2 + threadIdx.x * 2] = hist[threadIdx.x * 2];
+    output[block_id * blockDim.x * 2 + threadIdx.x * 2 + 1] = hist[threadIdx.x * 2 + 1];
+
+
     //EACH THREAD SUMS TAXON'S LTR PATH
-    if(hit_count > 0) {
-        
-    }
 
     //LEAD THREAD FINDS MAX VIA REDUCTION
-    output[block_id] = 7;
-    */
+
 }
 
 /*
@@ -322,7 +327,14 @@ __global__ void kernel(uint64_t * idx,
  *  |read len (8)| read (512) |
  *
  */
-void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size_t work_unit_size) {
+void process_file_gpu(char *filename, 
+                      KrakenDB *database, 
+                      map<uint32_t,uint32_t> &parent_map,
+                      bool Fastq_input, 
+                      size_t work_unit_size,
+                      ostream *Kraken_output,
+                      ostream *Classified_output,
+                      ostream *Unclassified_output) {
     string file_str(filename);
     DNASequenceReader *reader;
     DNASequence dna;
@@ -333,13 +345,19 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
         reader = new FastaReader(file_str);
     
     vector<DNASequence> reads;
-    ostringstream kraken_output_ss, classified_output_ss, unclassified_output_ss;
-    
+    ostringstream koss, coss, uoss;
+    bool Print_unclassified = false;
+    //bool Print_classified = true;
+    bool Print_kraken = false;
+    bool Only_classified_kraken_output = true;
+    bool Quick_mode = false;
+    uint32_t Minimum_hit_count = 3;
+
     //INITIALIZE GPU
     uint32_t max_read_len = 251;
     // HOST ALLOCATE
-    size_t byteLength = sizeof(char) * 4000000;
-    uint64_t * h_output;
+    size_t byteLength = sizeof(uint32_t) * 2 * 256 * 2000000;
+    uint32_t * h_output;
     gpuErrchk(cudaMallocHost( (void **)&h_output, byteLength ));
 
     // DEVICE ALLOCATE
@@ -349,7 +367,7 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
 
     char *h_reads;
     char * d_reads;
-    uint64_t * d_output;
+    uint32_t * d_output;
     uint64_t * d_idx;
     char * d_kdb;
 
@@ -387,7 +405,7 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
     cout<< "COPY TO TIME: " << copyto_ms << " ms" << endl;
 
     //KERNEL LOOP
-    //while (reader->is_valid()) {
+    while (reader->is_valid()) {
         reads.clear();
         size_t total_nt = 0;
         while (total_nt < work_unit_size) {
@@ -397,6 +415,8 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
             reads.push_back(dna);
             total_nt += dna.seq.size();
         }
+
+        cout << "TOTAL NT: " << total_nt << endl;
         
         // Convert vector of strings to GPU appropriate data structure
         int numReads = reads.size();
@@ -430,7 +450,7 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
         
         dim3 threads( blockSize, 1, 1 );
         dim3 blocks( numBlocks, 1, 1 );
-
+        
         //COPY WORK UNIT
         cudaEvent_t wucopyto_start, wucopyto_stop;
         cudaEventCreate(&wucopyto_start);
@@ -443,7 +463,7 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
         float wucopyto_ms = 0;
         cudaEventElapsedTime(&wucopyto_ms, wucopyto_start, wucopyto_stop);
         cout<< "WORK UNIT COPY TO TIME: " << wucopyto_ms << " ms" << endl;
-
+        
         // KERNEL LAUNCH
         cudaEvent_t kernel_start, kernel_stop;
         cudaEventCreate(&kernel_start);
@@ -481,45 +501,165 @@ void process_file_gpu(char *filename, KrakenDB *database, bool Fastq_input, size
         cudaEventElapsedTime(&kernel_ms, kernel_start, kernel_stop);
         cout<< "KERNEL TIME: " << kernel_ms << " ms" << endl;
         
-        //if (total_nt == 0)
-            //    break;
-                
-        //}
+        // MEM COPY FROM
+        cudaEvent_t copyfrom_start, copyfrom_stop;
+        cudaEventCreate(&copyfrom_start);
+        cudaEventCreate(&copyfrom_stop);
+        
+        cudaEventRecord(copyfrom_start);
+        
+        //
+        gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
+        
+        cudaEventRecord(copyfrom_stop);
+        cudaEventSynchronize(copyfrom_stop);
+        float copyfrom_ms = 0;
+        cudaEventElapsedTime(&copyfrom_ms, copyfrom_start, copyfrom_stop);
+        cout<< "COPY FROM TIME: " << copyfrom_ms << " ms" << endl;
+        
+        /*
+        for(int i = 0; i < 1024; i+=2) {
+            cout << "#" << dec << i/2 << ":gpu::taxon: " << dec << h_output[i] << " hit_count: " << h_output[i+1] << endl;
+        }
+        */
+        
+        koss.str("");
+        coss.str("");
+        uoss.str("");    
+        
+        // RESOLVE TREE FOR EACH READ
+        cout << "RESOLVING TREES FOR EACH READ..." << endl;
+        uint32_t total_classified = 0;
+        // TODO: Parameterize this
+        size_t read_hist_size = 2 * 256; // two locations for each thread
+        vector<uint32_t> taxa;
+        vector<uint8_t> ambig_list;            
+        map<uint32_t, uint32_t> hit_counts;
 
-    // MEM COPY FROM
-    cudaEvent_t copyfrom_start, copyfrom_stop;
-    cudaEventCreate(&copyfrom_start);
-    cudaEventCreate(&copyfrom_stop);
+        for(int read = 0; read < numReads; read++) {
+            //cout << read << endl;
+            
+            // create hit counts map
+            uint32_t taxon = h_output[read * read_hist_size];
+            uint32_t taxon_counter = 0;
+            
+            while(taxon != 0){
+                taxa.push_back(taxon);
+                ambig_list.push_back(0);
+                hit_counts[taxon] = h_output[read * read_hist_size + taxon_counter * 2 + 1];
+                taxon_counter++;
+                taxon = h_output[read * read_hist_size + taxon_counter * 2];
+            }
 
-    cudaEventRecord(copyfrom_start);
+            // PRINT CLASSIFICATION
+            uint32_t call = 0;
+            uint32_t hits = 0;
+            
+            // quick mode not implemented now
+            //cout << "starting resolve tree" << endl;
+            if (Quick_mode)
+                call = hits >= Minimum_hit_count ? taxon : 0;
+            else
+                call = resolve_tree(hit_counts, parent_map);
 
-    //
-    gpuErrchk( cudaMemcpy( h_output, d_output, byteLength, cudaMemcpyDeviceToHost ));
+            //cout << "TAXA: " << taxa.size() << endl;
+            //cout << "HITS: " << hit_counts.size() << endl;
 
-    cudaEventRecord(copyfrom_stop);
-    cudaEventSynchronize(copyfrom_stop);
-    float copyfrom_ms = 0;
-    cudaEventElapsedTime(&copyfrom_ms, copyfrom_start, copyfrom_stop);
-    cout<< "COPY FROM TIME: " << copyfrom_ms << " ms" << endl;
+            hit_counts.clear();
+            ambig_list.clear();
+            taxa.clear();
+
+
+            //cout << "ending resolve tree" << endl;
+            //cout << "CLASSIFICATION: " << call << endl;
+            
+            if (call)
+#pragma omp atomic
+                total_classified++;
+            
+            if (Print_unclassified || Print_classified) {
+                ostringstream *oss_ptr = call ? &coss : &uoss;
+                bool print = call ? Print_classified : Print_unclassified;
+                if (print) {
+                    if (Fastq_input) {
+                        (*oss_ptr) << "@" << reads[read].header_line << endl
+                                   << reads[read].seq << endl
+                                   << "+" << endl
+                                   << reads[read].quals << endl;
+                    }
+                    else {
+                        (*oss_ptr) << ">" << reads[read].header_line << endl
+                                   << reads[read].seq << endl;
+                    }
+                }
+            }
+            
+            if (! Print_kraken)
+                continue;
+            
+            if (call) {
+                koss << "C\t";
+            }
+            else {
+                if (Only_classified_kraken_output)
+                    continue;
+                koss << "U\t";
+            }
+            koss << reads[read].id << "\t" << call << "\t" << reads[read].seq.size() << "\t";
+            
+            if (Quick_mode) {
+                koss << "Q:" << hits;
+            }
+            else {
+                if (taxa.empty())
+                    koss << "0:0";
+                else
+                    koss << hitlist_string(taxa, ambig_list);
+            }
+            
+            koss << endl;
+        
+        }
+        
+        uint32_t total_sequences = 0;
+        uint32_t total_bases = 0;
+#pragma omp critical(write_output)
+        {
+            if (Print_kraken)
+                (*Kraken_output) << koss.str();
+            if (Print_classified)
+                (*Classified_output) << coss.str();
+            if (Print_unclassified)
+                (*Unclassified_output) << uoss.str();
+            total_sequences += work_unit_size;
+            total_bases += total_nt;
+            cerr << "\rProcessed " << total_sequences << " sequences (" << total_bases << " bp) ...";
+            
+        }
+        
+        
+        if (total_nt == 0)
+            break;
+        
+    }
+            
+            
 
     // PRINT OUTPUT
     /*
-    for(int i = 0; i < 256; i+=2) {
-        cout << "#" << dec << i/2 << ":gpu::kmer: " << hex << h_output[i] << " hit_count: " << h_output[i+1] << endl;
-    }
+      for(int i = 0; i < 256; i+=2) {
+      cout << "#" << dec << i/2 << ":gpu::kmer: " << hex << h_output[i] << " hit_count: " << h_output[i+1] << endl;
+      }
     */
     /*
       bytes
-    for(int i = 0; i < 500; i++) {
-        printf("i:%d %02X\n",i, (int)h_output[i]);
-        //cout << "i:" << i << setw(2) << setfill('0') << hex << (int) h_output[i] << endl ;
+      for(int i = 0; i < 500; i++) {
+      printf("i:%d %02X\n",i, (int)h_output[i]);
+      //cout << "i:" << i << setw(2) << setfill('0') << hex << (int) h_output[i] << endl ;
 
-    }
+      }
     */
     
-    kraken_output_ss.str("");
-    classified_output_ss.str("");
-    unclassified_output_ss.str("");    
       
     // CLEANUP
     gpuErrchk( cudaFree(d_reads) );
